@@ -18,6 +18,8 @@ package dev.morling.onebrc;
 import dev.vishrayne.onebrc.*;
 
 import java.io.IOException;
+import java.lang.foreign.Arena;
+import java.lang.foreign.MemorySegment;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.Map;
@@ -105,14 +107,18 @@ public class CalculateAverage_vishrayne {
     }
 
     private static void sequentialMemorySegmentReadTest() throws IOException {
-        MemorySegmentLinesSpliterator spliterator = new MemorySegmentLinesSpliterator(Paths.get(FILE));
-        Map<SegmentKey, ResultRow> sortedMeasurements = StreamSupport.stream(spliterator, false)
-                .parallel()
-                .map(dev.vishrayne.onebrc.Measurement::new)
-                .collect(MeasurementCollector.create());
+        try (Arena arena = Arena.ofShared()) {
+            MemorySegmentLinesSpliterator spliterator = new MemorySegmentLinesSpliterator(Paths.get(FILE), arena);
+            Map<SegmentKey, ResultRow> sortedMeasurements = StreamSupport.stream(spliterator, false)
+                    .parallel()
+                    .map((MemorySegment measurementMemorySegment) -> {
+                        return new dev.vishrayne.onebrc.Measurement(measurementMemorySegment);
+                    })
+                    .collect(MeasurementCollector.create());
 
-        System.out.println(sortedMeasurements.size());
+            System.out.println(sortedMeasurements.size());
 
-        spliterator.close();
+            spliterator.close();
+        }
     }
 }

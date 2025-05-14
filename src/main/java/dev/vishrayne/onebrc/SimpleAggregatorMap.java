@@ -240,4 +240,11 @@ public class SimpleAggregatorMap<K, V> {
         }
         throw new IllegalStateException("Resize failed to place an element: " + key);
     }
+
+    @SuppressWarnings("unchecked")
+    public void clear() {
+        this.keys = (K[]) new Object[this.capacity];
+        this.values = (V[]) new Object[this.capacity];
+        this.size = 0;
+    }
 }

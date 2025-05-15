@@ -64,7 +64,7 @@ public class MeasurementCollector implements Collector<Measurement, // Input ele
 
     // Add a single MeasurementHolder to the map
     private static void acceptNewMeasurement(SimpleAggregatorMap<SegmentKey, MeasurementAggregator> map, Measurement measurement) {
-        SegmentKey key = measurement.getStationSegmentKey();
+        SegmentKey key = measurement.stationSegmentKey;
         // computeIfAbsent gets or creates the aggregator, then we accumulate the measurement
         MeasurementAggregator aggregator = map.computeIfAbsent(key, k -> new MeasurementAggregator());
         aggregator.accumulate(measurement);

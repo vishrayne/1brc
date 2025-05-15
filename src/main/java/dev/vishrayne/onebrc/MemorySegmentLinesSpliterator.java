@@ -31,7 +31,7 @@ import java.nio.file.StandardOpenOption;
 import java.util.Spliterator;
 import java.util.function.Consumer;
 
-public class MemorySegmentLinesSpliterator implements Spliterator<MemorySegment> {
+public class MemorySegmentLinesSpliterator implements Spliterator<Measurement> {
     private final FileChannel fileChannel;
     private final MemorySegment fileSegment;
     private final Arena arena;
@@ -71,7 +71,7 @@ public class MemorySegmentLinesSpliterator implements Spliterator<MemorySegment>
     }
 
     @Override
-    public Spliterator<MemorySegment> trySplit() {
+    public Spliterator<Measurement> trySplit() {
         long remainingBytes = limit - currentPosition;
 
         // Fast path: don't split if too small
@@ -128,7 +128,7 @@ public class MemorySegmentLinesSpliterator implements Spliterator<MemorySegment>
     }
 
     @Override
-    public boolean tryAdvance(Consumer<? super MemorySegment> action) {
+    public boolean tryAdvance(Consumer<? super Measurement> action) {
         // Fast path: don't advance if EOF
         boolean canAdvance = currentPosition < limit;
         if (!canAdvance) {
@@ -140,6 +140,7 @@ public class MemorySegmentLinesSpliterator implements Spliterator<MemorySegment>
         long searchStart = this.currentPosition;
         long newLinePosition = -1;
         long separatorPosition = -1;
+        long prevSeparatorPosition = -1;
 
         for (long offset = searchStart; offset < searchLimit; offset += SPECIES.length()) {
             // Create a mask for the remaining bytes if near the end
@@ -153,6 +154,7 @@ public class MemorySegmentLinesSpliterator implements Spliterator<MemorySegment>
             // Find separator position
             VectorMask<Byte> vecEqSeparator = vec.eq(SEPARATOR_CHAR);
             if (vecEqSeparator.anyTrue()) {
+                prevSeparatorPosition = separatorPosition;
                 separatorPosition = offset + vecEqSeparator.firstTrue();
             }
 
@@ -173,16 +175,24 @@ public class MemorySegmentLinesSpliterator implements Spliterator<MemorySegment>
         lineLength -= (hasCarriageReturn ? 1 : 0);
 
         // Calculate station length
-        long lineSeparatedPosition = separatorPosition - currentPosition;
-        // Create line slice
-        MemorySegment lineSlice = fileSegment.asSlice(currentPosition, lineLength);
+        if (separatorPosition >= lineEndPosition) {
+            separatorPosition = prevSeparatorPosition;
+        }
+
+        long lineSeparatedPosition = separatorPosition != -1 ? separatorPosition - currentPosition : -1;
+
+        Measurement lineMemorySegment = new Measurement(
+                fileSegment,
+                currentPosition,
+                (int) lineSeparatedPosition,
+                (int) lineLength);
 
         // Update position for next iteration
         boolean foundNewline = (lineEndPosition < limit);
         currentPosition = lineEndPosition + (foundNewline ? 1 : 0);
 
         // Process the line
-        action.accept(lineSlice);
+        action.accept(lineMemorySegment);
 
         return true;
     }

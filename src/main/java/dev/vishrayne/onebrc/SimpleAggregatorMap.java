@@ -127,39 +127,64 @@ public class SimpleAggregatorMap<K, V> {
         if (key == null || mappingFunction == null)
             throw new NullPointerException();
 
-        int index = getInitialIndex(key);
-        int probes = 0;
-        while (probes < capacity) {
-            K currentKey = keys[index];
-            if (currentKey == null) { // Key not found, compute and insert
-                // Check resize *before* inserting
-                if (size + 1 >= resizeThreshold) {
-                    resize();
-                    // Recalculate index after resize before inserting
-                    return computeIfAbsent(key, mappingFunction); // Retry after resize
-                }
-                V newValue = mappingFunction.apply(key);
-                if (newValue == null)
-                    throw new NullPointerException("Mapping function returned null");
-                keys[index] = key;
-                values[index] = newValue;
-                size++;
-                return newValue;
-            }
-            else if (key.equals(currentKey)) { // Key found
-                return values[index];
-            }
-            index = (index + 1) & (capacity - 1); // Linear probe
-            probes++;
-        }
-        // Should not be reached if resize logic is correct.
-        // Defensive resize and retry
-        if (size >= capacity) {
-            resize();
-            return computeIfAbsent(key, mappingFunction); // Retry
-        }
+        // Outer loop to handle retries after a resize operation
+        OUTER_LOOP: while (true) {
+            // Capture current map properties for this attempt. These can change after resize().
+            int currentCapacity = this.capacity;
+            int currentResizeThreshold = this.resizeThreshold;
+            K[] currentKeys = this.keys; // Use local refs for current arrays
+            V[] currentValues = this.values;
 
-        throw new IllegalStateException("Map state error in computeIfAbsent.");
+            int index = getInitialIndex(key);
+
+            // Probing loop for the current capacity
+            for (int probeCount = 0; probeCount < currentCapacity; probeCount++) {
+                K currentKeyInMap = currentKeys[index];
+
+                if (currentKeyInMap == null) {
+                    // Found an empty slot. This is where we can insert the new key-value pair.
+                    // Check if resizing is needed BEFORE inserting the new element.
+                    if (this.size + 1 >= currentResizeThreshold) {
+                        // Adding this new element would meet or exceed the resize threshold.
+                        resize(); // Perform resize
+                        continue OUTER_LOOP; // Restart the whole process with the new capacity
+                    }
+
+                    // No resize needed, proceed to compute and insert the new value.
+                    V newValue = mappingFunction.apply(key); // Critical for 1BRC: new MeasurementAggregator()
+                    if (newValue == null) {
+                        throw new NullPointerException("Mapping function returned null");
+                    }
+
+                    // It's possible another thread resized and inserted concurrently if this map were
+                    // used in a concurrent setting without external synchronization on this instance.
+                    // For 1BRC, often maps are thread-local or carefully managed.
+                    // Assuming single-threaded access or proper external synchronization for this write path:
+                    currentKeys[index] = key;
+                    currentValues[index] = newValue;
+                    this.size++;
+                    return newValue;
+                }
+                else if (key.equals(currentKeyInMap)) {
+                    // Key found, return the existing value.
+                    return currentValues[index];
+                }
+
+                // Linear probe: advance to the next slot.
+                index = (index + 1) & (currentCapacity - 1);
+            }
+
+            // If the inner probing loop completes, it means all 'currentCapacity' slots were probed,
+            // no empty slot (null key) was found, and the key itself wasn't found among existing entries.
+            // This implies the map is currently full of other items. We MUST resize.
+            // (The original code had `if (size >= capacity)` here, which should be true if the loop finishes this way)
+            resize();
+            // The OUTER_LOOP will then restart the process with the new, larger capacity.
+            // No explicit `continue OUTER_LOOP` is needed here as it's the end of the `while(true)` body's normal path before looping.
+        }
+        // The `while(true)` loop coupled with `resize()` should always eventually
+        // lead to either finding the key, finding a slot for insertion, or resizing until a slot is available (barring out-of-memory errors during resize).
+        // If `resize()` itself throws an exception (e.g., out of memory or max capacity reached), that would propagate.
     }
 
     /** Iterates over map entries. */

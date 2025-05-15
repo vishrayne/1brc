@@ -6,7 +6,7 @@ import java.nio.charset.StandardCharsets;
 
 public class SegmentKey implements Comparable<SegmentKey> {
     private final MemorySegment sourceSegment;
-    private final int start;
+    private final long start;
     private final int length;
     private int preComputedHashCode = 0;
     private String cachedStationName = null;
@@ -23,16 +23,16 @@ public class SegmentKey implements Comparable<SegmentKey> {
         this.length = (int) length;
     }
 
-    public SegmentKey(MemorySegment lineSegment, long start, long length) {
+    public SegmentKey(MemorySegment lineSegment, long start, int length) {
         this.sourceSegment = lineSegment;
-        this.start = (int) start;
-        this.length = (int) length;
+        this.start = start;
+        this.length = length;
     }
 
     @Override
     public int hashCode() {
         if (preComputedHashCode == 0 && length > 0) {
-            preComputedHashCode = computeHashCode2();
+            preComputedHashCode = computeHashCodeSimple();
         }
 
         return preComputedHashCode;
@@ -51,7 +51,7 @@ public class SegmentKey implements Comparable<SegmentKey> {
             return false;
 
         return this.sourceSegment.asSlice(start, length)
-                .mismatch(other.sourceSegment.asSlice(start, length)) == -1;
+                .mismatch(this.sourceSegment.asSlice(other.start, other.length)) == -1;
     }
 
     @Override
@@ -64,7 +64,7 @@ public class SegmentKey implements Comparable<SegmentKey> {
         if (commonLength > 0) {
             // Ensure we're comparing the correct slices if sourceSegment isn't already minimal
             mismatchOffset = this.sourceSegment.asSlice(start, commonLength)
-                    .mismatch(other.sourceSegment.asSlice(start, commonLength));
+                    .mismatch(other.sourceSegment.asSlice(other.start, commonLength));
         }
 
         if (mismatchOffset == -1) {
@@ -73,8 +73,8 @@ public class SegmentKey implements Comparable<SegmentKey> {
         }
         else {
             // Mismatch found, compare the bytes at that offset
-            byte b1 = this.sourceSegment.get(ValueLayout.JAVA_BYTE, mismatchOffset);
-            byte b2 = other.sourceSegment.get(ValueLayout.JAVA_BYTE, mismatchOffset);
+            byte b1 = this.sourceSegment.get(ValueLayout.JAVA_BYTE, start + mismatchOffset);
+            byte b2 = other.sourceSegment.get(ValueLayout.JAVA_BYTE, other.start + mismatchOffset);
             return Integer.compare(b1 & 0xFF, b2 & 0xFF); // Unsigned byte comparison
         }
     }
@@ -89,13 +89,25 @@ public class SegmentKey implements Comparable<SegmentKey> {
         return cachedStationName;
     }
 
-    private int computeHashCode2() {
+    private int computeHashCodeSimple() {
         int result = 1;
-        for (int i = start; i < length; i++) {
+        long absoluteLength = start + length;
+        for (long i = start; i < absoluteLength; i++) {
             // Access directly from sourceSegment
-            result = 31 * result + (sourceSegment.get(ValueLayout.JAVA_BYTE, i) & 0xFF);
+            result = 31 * result + (sourceSegment.get(ValueLayout.JAVA_BYTE, i));
         }
 
         return result;
+    }
+
+    @Override
+    public String toString() {
+        return "\n =========== \nSegmentKey{" +
+                "sourceSegment=" + sourceSegment +
+                ", segmentLength=" + sourceSegment.byteSize() +
+                ", start=" + start +
+                ", length=" + length +
+                ", preComputedHashCode=" + preComputedHashCode +
+                '}';
     }
 }
